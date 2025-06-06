@@ -31,13 +31,13 @@ class OllamaPromptFromIdea:
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "model": (OLLAMA_MODELS, {"description": "Select the Ollama model to generate prompts with."}),
-                "idea": ("STRING", {"multiline": True, "default": "futuristic cyberpunk city", "description": "Enter the core concept or theme for your prompt to ollama."}),
-                "avoid": ("STRING", {"multiline": True, "default": "", "description": "Words or themes to exclude from the prompt.(non ollama prompting)"}),
-                "max_tokens": ("INT", {"default": 77, "min": 10, "max": 304, "description": "Maximum token length for the generated prompt."}),
-                "min_tokens": ("INT", {"default": 60, "min": 10, "max": 140, "description": "Minimum token length for the generated prompt."}),
-                "max_attempts": ("INT", {"default": 30, "min": 1, "max": 150, "description": "Number of attempts to generate a prompt fitting token limits."}),
-                "regen_on_each_use": ("BOOLEAN", {"default": True, "description": "Force regeneration on each node execution."}),
+                "model": (OLLAMA_MODELS, {"tooltip": "Select the Ollama model to generate prompts with."}),
+                "idea": ("STRING", {"multiline": True, "default": "futuristic cyberpunk city", "tooltip": "Enter the core concept or theme for your prompt to ollama."}),
+                "avoid": ("STRING", {"multiline": True, "default": "", "tooltip": "Words or themes to exclude from the prompt.(non ollama prompting)"}),
+                "max_tokens": ("INT", {"default": 77, "min": 10, "max": 231, "tooltip": "Maximum token length for the generated prompt."}),
+                "min_tokens": ("INT", {"default": 60, "min": 10, "max": 230, "tooltip": "Minimum token length for the generated prompt."}),
+                "max_attempts": ("INT", {"default": 30, "min": 1, "max": 200, "tooltip": "Number of attempts to generate a prompt fitting token limits."}),
+                "regen_on_each_use": ("BOOLEAN", {"default": True, "tooltip": "Force regeneration on each node execution."}),
             }
         }
     RETURN_TYPES = ("STRING", "STRING",)
