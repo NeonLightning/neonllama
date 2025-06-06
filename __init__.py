@@ -57,7 +57,7 @@ class OllamaPromptFromIdea:
         token_min = min(min_tokens, max_tokens)
         token_expand_threshold = int(token_min * 0.75)
         last_output = None
-        avoid_clause = f"\nAvoid mentioning: {avoid.strip()}" if avoid.strip() else ""
+        avoid_clause = f"\nABSOLUTELY avoid mentioning: {avoid.strip()}" if avoid.strip() else ""
         for attempt in range(1, max_attempts + 1):
             try:
                 if last_output is None:
