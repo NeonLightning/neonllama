@@ -1,0 +1,16 @@
+[project]
+name = "neonllama"
+description = "This custom ComfyUI node transforms a core idea into a richly detailed positive prompt using a local [a/Ollama](https://ollama.com) LLM."
+version = "1.0.0"
+license = {file = "LICENSE"}
+dependencies = ["requests>=2.28.0", "tokenizers>=0.13.3", "typing-extensions>=4.5.0"]
+
+[project.urls]
+Repository = "https://github.com/NeonLightning/neonllama"
+#  Used by Comfy Registry https://registry.comfy.org
+
+[tool.comfy]
+PublisherId = ""
+DisplayName = "neonllama"
+Icon = ""
+includes = []
