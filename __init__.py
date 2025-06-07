@@ -3,6 +3,7 @@ import time
 import random
 import requests.exceptions  
 from tokenizers import Tokenizer
+import os
 
 seed = random.randint(0, 99999999)
 
@@ -40,17 +41,16 @@ class OllamaPromptFromIdea:
                 "regen_on_each_use": ("BOOLEAN", {"default": True, "tooltip": "Force regeneration on each node execution."}),
             }
         }
+
     RETURN_TYPES = ("STRING", "STRING", "STRING",)
     RETURN_NAMES = ("prompt", "negative", "idea")
     FUNCTION = "generate_prompt"
     CATEGORY = "Ollama"
-    
+
     @classmethod
     def IS_CHANGED(cls, **kwargs):
-        if kwargs.get("regen_on_each_use", True):
             return float("NaN")
-        return None
-    
+
     def generate_prompt(self, model, idea, negative, max_tokens, min_tokens, max_attempts, regen_on_each_use):
         if not negative:
             negative = ""
@@ -59,6 +59,23 @@ class OllamaPromptFromIdea:
 
         idea_list = [i.strip() for i in idea.strip().split("\n") if i.strip()]
         generated_prompts = []
+
+        prompt_log_file = "ollama_prompt_log.txt"
+
+        if not regen_on_each_use:
+            try:
+                with open(prompt_log_file, "r", encoding="utf-8") as f:
+                    file_prompt = f.read().strip()
+                    print("[Ollama] Loaded prompt from file instead of regenerating.")
+                    return (file_prompt, negative, idea)
+            except FileNotFoundError:
+                print("[Ollama] Prompt file not found. Falling back to input ideas.")
+                fallback_prompt = " BREAK ".join(idea_list)
+                return (fallback_prompt, negative, idea)
+            except Exception as e:
+                print(f"[Ollama] Failed to load cached prompt file: {e}")
+                fallback_prompt = " BREAK ".join(idea_list)
+                return (fallback_prompt, negative, idea)
 
         for idx, sub_idea in enumerate(idea_list):
             print(f"\n🧠 Generating prompt for idea {idx + 1}: '{sub_idea}'")
@@ -72,9 +89,8 @@ class OllamaPromptFromIdea:
                     avoid_text = " | ".join(used_phrases)
                     avoid_clause = ""
                     if avoid_text.strip() and (negative.strip() or idx > 0):
-                        avoid_clause = (
-                            f"\nABSOLUTELY avoid using or repeating any of the following phrases or content but keep them in mind: {avoid_text}"
-                        )
+                        avoid_clause = f"\nABSOLUTELY avoid using or repeating any of the following phrases or content but keep them in mind: {avoid_text}"
+
                     if last_output is None:
                         system_prompt = (
                             f"Convert the following idea into a richly descriptive, visually detailed image prompt for Stable Diffusion XL. "
@@ -83,6 +99,7 @@ class OllamaPromptFromIdea:
                             f"Use multi-word descriptions only where needed. "
                             f"Do not include full sentences, storytelling, or subjective opinions. "
                             f"Use only short descriptions. and don't describe feeling. "
+                            f"Use an appropriate amount of commas to separate ideas for a image prompt. no excessive ideas."
                             f"Target between {token_min} and {max_tokens} tokens. "
                             f"{avoid_clause}"
                             f"Reminder: You MUST preserve all core themes of the original idea. The original idea is: {sub_idea} DO NOT CHANGE THE IDEA."
@@ -96,37 +113,23 @@ class OllamaPromptFromIdea:
                                 f"The following prompt is too long (over {max_tokens} tokens). "
                                 f"Revise it to be shorter but keep visual richness and specificity. "
                                 f"Use compact phrases or brief expressions with light structure. "
-                                f"Avoid long sentences or reinterpreting the concept. "
-                                f"Use only short descriptions. and don't describe feeling. "
                                 f"{avoid_clause}"
                                 f"Reminder: You MUST preserve all core themes of the original idea. The original idea is: {sub_idea} DO NOT CHANGE THE IDEA."
-                                f"you MUST NOT ever talk about your thought process or explain how you generated the prompt."
                                 f"\nPrevious prompt: {last_output}\nShorter prompt:"
                             )
                         elif token_count < token_expand_threshold:
                             system_prompt = (
                                 f"The following prompt is too short (under {token_expand_threshold} tokens). "
                                 f"Expand it by adding specific, vivid imagery using short but rich phrases. "
-                                f"Include unique textures, lighting effects, environments, and visual motifs. "
-                                f"Light structure is allowed: use connectors like 'with', 'under', 'surrounded by', etc. "
-                                f"Do not repeat phrases or rearrange words – add new coherent, visual material. "
-                                f"Use only short descriptions. and don't describe feeling. "
-                                f"Avoid full sentences or storylines. "
                                 f"{avoid_clause}"
                                 f"Reminder: You MUST preserve all core themes of the original idea. The original idea is: {sub_idea} DO NOT CHANGE THE IDEA."
-                                f"you MUST NOT ever talk about your thought process or explain how you generated the prompt."
                                 f"\nPrevious prompt: {last_output}\nExpanded prompt:"
                             )
                         else:
                             system_prompt = (
                                 f"Revise the following prompt to improve clarity and vividness, while keeping all original ideas intact. "
-                                f"You may slightly structure the phrases for better flow. "
-                                f"Do not add new concepts or remove core elements. "
-                                f"Use only short descriptions. and don't describe feeling. "
-                                f"Keep it between {token_min}–{max_tokens} tokens. "
                                 f"{avoid_clause}"
                                 f"Reminder: You MUST preserve all core themes of the original idea. The original idea is: {sub_idea} DO NOT CHANGE THE IDEA."
-                                f"you MUST NOT ever talk about your thought process or explain how you generated the prompt."
                                 f"\nPrevious prompt: {last_output}\nRevised prompt:"
                             )
 
@@ -162,10 +165,11 @@ class OllamaPromptFromIdea:
                         print("✔️ Prompt accepted.")
                         generated_prompts.append(raw_result)
                         break
+
                     last_output = raw_result
-                    reason = "too long" if token_count > max_tokens else "too short"
-                    print(f"⚠️ Prompt {reason}. Retrying...\n")
+                    print(f"⚠️ Prompt out of bounds. Retrying...\n")
                     time.sleep(0.5)
+
                 except requests.exceptions.Timeout:
                     print(f"⚠️ Attempt {attempt}/{max_attempts} timed out. Retrying...\n")
                     time.sleep(0.5)
@@ -173,13 +177,23 @@ class OllamaPromptFromIdea:
                 except Exception as e:
                     error_msg = f"[Ollama Error] {str(e)}"
                     print(error_msg)
-                    return (error_msg, "")
+                    return (error_msg, negative, idea)
+
             else:
                 print(f"❌ Max attempts for idea '{sub_idea}' reached. Using original as fallback.")
                 generated_prompts.append(sub_idea)
-        outputend="\nBREAK\n".join(generated_prompts)
-        print(f"output of:{outputend}")
-        return (" BREAK ".join(generated_prompts), negative, idea)
+
+        final_prompt = " BREAK ".join(generated_prompts)
+        print(f"output of: {final_prompt}")
+
+        # Save to file using w+ (overwrite)
+        try:
+            with open(prompt_log_file, "w+", encoding="utf-8") as f:
+                f.write(final_prompt)
+        except Exception as log_error:
+            print(f"⚠️ Failed to write prompt to file: {log_error}")
+
+        return (final_prompt, negative, idea)
 
     def ui(self, inputs, outputs):
         prompt_str = outputs[0] if isinstance(outputs, (list, tuple)) and outputs else ""
