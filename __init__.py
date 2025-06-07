@@ -1,3 +1,5 @@
+import subprocess
+import requests
 import requests
 import time
 import random
@@ -27,6 +29,31 @@ tokenizer = Tokenizer.from_pretrained("laion/CLIP-ViT-bigG-14-laion2B-39B-b160k"
 def estimate_tokens(text):
     return tokenizer.encode(text).ids
 
+def clear_ollama_model():
+    try:
+        result = subprocess.run(["ollama", "ps"], capture_output=True, text=True, check=True)
+        lines = result.stdout.strip().splitlines()
+        if len(lines) < 2:
+            print("No model is currently loaded.")
+            return False
+        model_name = lines[1].split()[0]
+        if not model_name:
+            print("Could not determine model name.")
+            return False
+        res = requests.post(
+            "http://localhost:11434/api/generate",
+            json={"model": model_name, "keep_alive": 0},
+            timeout=10
+        )
+        res.raise_for_status()
+        print(f"Unloaded model: {model_name}")
+        return True
+    except subprocess.CalledProcessError as e:
+        print(f"Error running 'ollama ps': {e}")
+    except requests.exceptions.RequestException as e:
+        print(f"Error sending unload request: {e}")
+    return False
+
 class OllamaPromptFromIdea:
     @classmethod
     def INPUT_TYPES(cls):
@@ -38,7 +65,8 @@ class OllamaPromptFromIdea:
                 "max_tokens": ("INT", {"default": 75, "min": 10, "max": 231, "tooltip": "Maximum token length for the generated prompt."}),
                 "min_tokens": ("INT", {"default": 50, "min": 10, "max": 230, "tooltip": "Minimum token length for the generated prompt."}),
                 "max_attempts": ("INT", {"default": 30, "min": 1, "max": 200, "tooltip": "Number of attempts to generate a prompt fitting token limits."}),
-                "regen_on_each_use": ("BOOLEAN", {"default": True, "tooltip": "Force regeneration on each node execution."}),
+                "regen_on_each_use": ("BOOLEAN", {"default": True, "tooltip": "Force regeneration on each node execution.(doesn't matter if just_use_idea is on)"}),
+                "just_use_idea": ("BOOLEAN", {"default": True, "tooltip": "Skip Generating and just use idea as prompt."}),
             }
         }
 
@@ -51,17 +79,16 @@ class OllamaPromptFromIdea:
     def IS_CHANGED(cls, **kwargs):
             return float("NaN")
 
-    def generate_prompt(self, model, idea, negative, max_tokens, min_tokens, max_attempts, regen_on_each_use):
+    def generate_prompt(self, model, idea, negative, max_tokens, min_tokens, max_attempts, regen_on_each_use, just_use_idea):
+        if just_use_idea:
+            return (idea, negative, idea)
         if not negative:
             negative = ""
         token_min = min(min_tokens, max_tokens)
         token_expand_threshold = int(token_min * 0.75)
-
         idea_list = [i.strip() for i in idea.strip().split("\n") if i.strip()]
         generated_prompts = []
-
         prompt_log_file = "ollama_prompt_log.txt"
-
         if not regen_on_each_use:
             try:
                 with open(prompt_log_file, "r", encoding="utf-8") as f:
@@ -83,14 +110,12 @@ class OllamaPromptFromIdea:
             used_phrases = []
             if negative.strip():
                 used_phrases.append(negative.strip())
-
             for attempt in range(1, max_attempts + 1):
                 try:
                     avoid_text = " | ".join(used_phrases)
                     avoid_clause = ""
                     if avoid_text.strip() and (negative.strip() or idx > 0):
                         avoid_clause = f"\nABSOLUTELY avoid using or repeating any of the following phrases or content but keep them in mind: {avoid_text}"
-
                     if last_output is None:
                         system_prompt = (
                             f"Convert the following idea into a richly descriptive, visually detailed image prompt for Stable Diffusion XL. "
@@ -132,7 +157,6 @@ class OllamaPromptFromIdea:
                                 f"Reminder: You MUST preserve all core themes of the original idea. The original idea is: {sub_idea} DO NOT CHANGE THE IDEA."
                                 f"\nPrevious prompt: {last_output}\nRevised prompt:"
                             )
-
                     seed = random.randint(0, 99999999)
                     response = requests.post(
                         "http://localhost:11434/api/generate",
@@ -152,47 +176,46 @@ class OllamaPromptFromIdea:
                     token_count = len(estimate_tokens(raw_result))
                     print(f"Idea: {idx + 1} Attempt: {attempt}/{max_attempts} Ollama result: {raw_result}")
                     print(f"→ Token count: {token_count} (target: {token_min}–{max_tokens})")
-
                     if last_output is not None and raw_result.strip() == last_output.strip():
                         print("⚠️ Prompt identical to last attempt. Restarting generation from scratch...\n")
                         last_output = None
                         seed = random.randint(0, 99999999)
                         time.sleep(0.5)
                         continue
-
                     if token_min <= token_count <= max_tokens:
                         used_phrases.append(raw_result)
                         print("✔️ Prompt accepted.")
+                        clear_ollama_model()
                         generated_prompts.append(raw_result)
                         break
-
                     last_output = raw_result
                     print(f"⚠️ Prompt out of bounds. Retrying...\n")
                     time.sleep(0.5)
-
+                except requests.exceptions.HTTPError as e:
+                    if e.response.status_code == 500:
+                        print(f"⚠️ Attempt {attempt}/{max_attempts} 500 error. Retrying...\n")
+                        clear_ollama_model()
+                        time.sleep(1)
+                        continue                    
                 except requests.exceptions.Timeout:
                     print(f"⚠️ Attempt {attempt}/{max_attempts} timed out. Retrying...\n")
-                    time.sleep(0.5)
+                    time.sleep(1)
                     continue
                 except Exception as e:
                     error_msg = f"[Ollama Error] {str(e)}"
                     print(error_msg)
                     return (error_msg, negative, idea)
-
             else:
                 print(f"❌ Max attempts for idea '{sub_idea}' reached. Using original as fallback.")
+                clear_ollama_model()
                 generated_prompts.append(sub_idea)
-
         final_prompt = " BREAK ".join(generated_prompts)
         print(f"output of: {final_prompt}")
-
-        # Save to file using w+ (overwrite)
         try:
             with open(prompt_log_file, "w+", encoding="utf-8") as f:
                 f.write(final_prompt)
         except Exception as log_error:
             print(f"⚠️ Failed to write prompt to file: {log_error}")
-
         return (final_prompt, negative, idea)
 
     def ui(self, inputs, outputs):
