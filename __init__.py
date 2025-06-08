@@ -1,7 +1,8 @@
 import subprocess
 import requests
 import time
-import requests.exceptions  
+import requests.exceptions
+from pathlib import Path
 from tokenizers import Tokenizer
 
 def fetch_ollama_models():
@@ -83,7 +84,7 @@ class OllamaPromptFromIdea:
             negative = ""
         idea_list = [i.strip() for i in idea.strip().split("\n") if i.strip()]
         generated_prompts = []
-        prompt_log_file = "ollama_prompt_log.txt"
+        prompt_log_file = Path("ollama_prompt_log.txt")
         if not regen_on_each_use:
             try:
                 with open(prompt_log_file, "r", encoding="utf-8") as f:
