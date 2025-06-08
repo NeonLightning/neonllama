@@ -1,18 +1,13 @@
 import subprocess
 import requests
-import requests
 import time
-import random
 import requests.exceptions  
 from tokenizers import Tokenizer
-import os
-
-seed = random.randint(0, 99999999)
 
 def fetch_ollama_models():
     url = "http://localhost:11434/api/tags"
     try:
-        res = requests.get(url, timeout=2)
+        res = requests.get(url, timeout=5)
         res.raise_for_status()
         data = res.json()
         models = [m["model"] for m in data.get("models", [])]
@@ -54,6 +49,8 @@ def clear_ollama_model():
         print(f"Error sending unload request: {e}")
     return False
 
+clear_ollama_model()
+
 class OllamaPromptFromIdea:
     @classmethod
     def INPUT_TYPES(cls):
@@ -77,15 +74,13 @@ class OllamaPromptFromIdea:
 
     @classmethod
     def IS_CHANGED(cls, **kwargs):
-            return float("NaN")
+        return float("NaN")
 
     def generate_prompt(self, model, idea, negative, max_tokens, min_tokens, max_attempts, regen_on_each_use, just_use_idea):
         if just_use_idea:
             return (idea, negative, idea)
         if not negative:
             negative = ""
-        token_min = min(min_tokens, max_tokens)
-        token_expand_threshold = int(token_min * 0.75)
         idea_list = [i.strip() for i in idea.strip().split("\n") if i.strip()]
         generated_prompts = []
         prompt_log_file = "ollama_prompt_log.txt"
@@ -103,11 +98,11 @@ class OllamaPromptFromIdea:
                 print(f"[Ollama] Failed to load cached prompt file: {e}")
                 fallback_prompt = " BREAK ".join(idea_list)
                 return (fallback_prompt, negative, idea)
-
         for idx, sub_idea in enumerate(idea_list):
             print(f"\n🧠 Generating prompt for idea {idx + 1}: '{sub_idea}'")
             last_output = None
             used_phrases = []
+            timeout_number = 0
             if negative.strip():
                 used_phrases.append(negative.strip())
             for attempt in range(1, max_attempts + 1):
@@ -115,7 +110,7 @@ class OllamaPromptFromIdea:
                     avoid_text = " | ".join(used_phrases)
                     avoid_clause = ""
                     if avoid_text.strip() and (negative.strip() or idx > 0):
-                        avoid_clause = f"\nABSOLUTELY avoid using or repeating any of the following phrases or content but keep them in mind: {avoid_text}"
+                        avoid_clause = f"\nABSOLUTELY DO NOT use or repeat any of the following phrases or content {avoid_text}"
                     if last_output is None:
                         system_prompt = (
                             f"Convert the following idea into a richly descriptive, visually detailed image prompt for Stable Diffusion XL. "
@@ -125,7 +120,7 @@ class OllamaPromptFromIdea:
                             f"Do not include full sentences, storytelling, or subjective opinions. "
                             f"Use only short descriptions. and don't describe feeling. "
                             f"Use an appropriate amount of commas to separate ideas for a image prompt. no excessive ideas."
-                            f"Target between {token_min} and {max_tokens} tokens. "
+                            f"Target between {min_tokens} and {max_tokens} tokens and all on one line."
                             f"{avoid_clause}"
                             f"Reminder: You MUST preserve all core themes of the original idea. The original idea is: {sub_idea} DO NOT CHANGE THE IDEA."
                             f"you MUST NOT ever talk about your thought process or explain how you generated the prompt."
@@ -136,28 +131,29 @@ class OllamaPromptFromIdea:
                         if token_count > max_tokens:
                             system_prompt = (
                                 f"The following prompt is too long (over {max_tokens} tokens). "
-                                f"Revise it to be shorter but keep visual richness and specificity. "
+                                f"Revise it to be shorter but keep visual richness and specificity and all on one line."
                                 f"Use compact phrases or brief expressions with light structure. "
                                 f"{avoid_clause}"
+                                f"you MUST NOT ever talk about your thought process or explain how you generated the prompt."
                                 f"Reminder: You MUST preserve all core themes of the original idea. The original idea is: {sub_idea} DO NOT CHANGE THE IDEA."
                                 f"\nPrevious prompt: {last_output}\nShorter prompt:"
                             )
-                        elif token_count < token_expand_threshold:
+                        elif token_count < min_tokens:
                             system_prompt = (
-                                f"The following prompt is too short (under {token_expand_threshold} tokens). "
-                                f"Expand it by adding specific, vivid imagery using short but rich phrases. "
+                                f"The following prompt is too short (under {min_tokens} tokens). "
+                                f"Expand it by adding specific, vivid imagery using short but rich phrases and all on one line."
                                 f"{avoid_clause}"
+                                f"you MUST NOT ever talk about your thought process or explain how you generated the prompt."
                                 f"Reminder: You MUST preserve all core themes of the original idea. The original idea is: {sub_idea} DO NOT CHANGE THE IDEA."
                                 f"\nPrevious prompt: {last_output}\nExpanded prompt:"
                             )
                         else:
                             system_prompt = (
-                                f"Revise the following prompt to improve clarity and vividness, while keeping all original ideas intact. "
+                                f"Revise the following prompt to improve clarity and vividness, while keeping all original ideas intact and all on one line."
                                 f"{avoid_clause}"
                                 f"Reminder: You MUST preserve all core themes of the original idea. The original idea is: {sub_idea} DO NOT CHANGE THE IDEA."
                                 f"\nPrevious prompt: {last_output}\nRevised prompt:"
                             )
-                    seed = random.randint(0, 99999999)
                     response = requests.post(
                         "http://localhost:11434/api/generate",
                         json={
@@ -165,31 +161,32 @@ class OllamaPromptFromIdea:
                             "prompt": system_prompt,
                             "stream": False,
                             "options": {
-                                "seed": seed,
-                                "temperature": 0.7
+                                "temperature": 0.3
                             }
                         },
-                        timeout=120,
+                        timeout=60,
                     )
                     response.raise_for_status()
                     raw_result = response.json().get("response", "").strip()
                     token_count = len(estimate_tokens(raw_result))
                     print(f"Idea: {idx + 1} Attempt: {attempt}/{max_attempts} Ollama result: {raw_result}")
-                    print(f"→ Token count: {token_count} (target: {token_min}–{max_tokens})")
+                    print(f"→ Token count: {token_count} (target: {min_tokens}–{max_tokens})")
                     if last_output is not None and raw_result.strip() == last_output.strip():
                         print("⚠️ Prompt identical to last attempt. Restarting generation from scratch...\n")
                         last_output = None
-                        seed = random.randint(0, 99999999)
+                        timeout_number = 0
                         time.sleep(0.5)
                         continue
-                    if token_min <= token_count <= max_tokens:
+                    if min_tokens <= token_count <= max_tokens:
                         used_phrases.append(raw_result)
                         print("✔️ Prompt accepted.")
+                        timeout_number = 0
                         clear_ollama_model()
                         generated_prompts.append(raw_result)
                         break
                     last_output = raw_result
                     print(f"⚠️ Prompt out of bounds. Retrying...\n")
+                    timeout_number = 0
                     time.sleep(0.5)
                 except requests.exceptions.HTTPError as e:
                     if e.response.status_code == 500:
@@ -198,15 +195,23 @@ class OllamaPromptFromIdea:
                         time.sleep(1)
                         continue                    
                 except requests.exceptions.Timeout:
-                    print(f"⚠️ Attempt {attempt}/{max_attempts} timed out. Retrying...\n")
-                    time.sleep(1)
-                    continue
+                    if timeout_number < 6:
+                        print(f"⚠️ Attempt {attempt}/{max_attempts} timed out. Retrying...\n")
+                        time.sleep(1)
+                        timeout_number += 1
+                        continue
+                    else:
+                        error_msg = f"Too many timeouts (5). Falling back to idea."
+                        generated_prompts.append(sub_idea)
+                        timeout_number = 0
+                        break
                 except Exception as e:
                     error_msg = f"[Ollama Error] {str(e)}"
                     print(error_msg)
                     return (error_msg, negative, idea)
             else:
                 print(f"❌ Max attempts for idea '{sub_idea}' reached. Using original as fallback.")
+                timeout_number = 0
                 clear_ollama_model()
                 generated_prompts.append(sub_idea)
         final_prompt = " BREAK ".join(generated_prompts)
@@ -227,7 +232,6 @@ class OllamaPromptFromIdea:
 NODE_CLASS_MAPPINGS = {
     "OllamaPromptFromIdea": OllamaPromptFromIdea,
 }
-
 NODE_DISPLAY_NAME_MAPPINGS = {
     "OllamaPromptFromIdea": "🧠 Ollama Prompt From Idea",
 }
