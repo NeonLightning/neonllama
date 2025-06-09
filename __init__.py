@@ -3,6 +3,7 @@ import requests
 import time
 import requests.exceptions
 from pathlib import Path
+from comfy.utils import ProgressBar
 from tokenizers import Tokenizer
 import lmstudio
 import lmstudio as lms
@@ -136,6 +137,8 @@ class OllamaPromptFromIdea:
         actual_model_name = model.split(":")[1] if ":" in model else model
         print(f"[LLM Prompt Node] Using model: {actual_model_name} from {'Ollama' if is_ollama_model else 'LM Studio'}")
         idea_list = [i.strip() for i in idea.strip().split("\n") if i.strip()]
+        total_attempts = len(idea_list) * max_attempts
+        pbar = ProgressBar(total_attempts)
         if not idea_list:
             print("[LLM Prompt Node] No valid ideas provided. Returning empty prompt.")
             return ("", negative, "")
@@ -168,6 +171,7 @@ class OllamaPromptFromIdea:
             if negative.strip():
                 used_phrases.append(negative.strip())
             for attempt in range(1, max_attempts + 1):
+                pbar.update_absolute((idx * max_attempts) + (attempt - 1))
                 try:
                     avoid_text = " | ".join(used_phrases)
                     avoid_clause = ""
@@ -337,6 +341,7 @@ class OllamaPromptFromIdea:
                 generated_prompts.append(sub_idea)
         final_prompt = " BREAK ".join(generated_prompts)
         print(f"\nFinal Generated Prompt: {final_prompt}")
+        pbar.update_absolute(max_attempts)
         try:
             with open(prompt_log_file, "w+", encoding="utf-8") as f:
                 f.write(final_prompt)
