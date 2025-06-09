@@ -1,55 +1,55 @@
 # 🧠 NeonLLama ComfyUI Extension
 
-**NeonLLama** is a custom ComfyUI node that transforms one or more **idea lines** into vivid, richly detailed prompts using a local [Ollama](https://ollama.com) LLM. It also supports **avoid** content, which the model takes into account to steer generation — and is returned as a **negative prompt**.
+**NeonLLama** is a custom ComfyUI node that transforms one or more **idea lines** into vivid, richly detailed prompts using a local LLM — either through [Ollama](https://ollama.com) or [LM Studio](https://lmstudio.ai). It supports **avoid** content to guide generation and returns that list as the **negative prompt**.
 
 ---
 
 ## 🚀 Features
 
-- 🧠 Generates a structured, richly visual **positive prompt** from a simple idea.
-- ✂️ Supports **multi-line idea inputs** — each line becomes its own generation.
-- ⛔ Accepts an "avoid" list to influence prompt generation by avoiding unwanted terms.
-- 🎯 Outputs the avoid list unmodified as the **negative prompt** (for Stable Diffusion, etc.).
-- 🧮 Accurate token control using `laion/CLIP-ViT-bigG-14-laion2B-39B-b160k` tokenizer.
-- 🔁 Retries intelligently until token limits are respected.
-- ⚙️ Highly configurable: model choice, token ranges, max attempts, regen flag, and more.
-- 🖨️ Returns all prompts in order and allows re-run on every use.
+* 🧠 Converts simple ideas into rich, structured **positive prompts**.
+* ✂️ Supports **multi-line input** — each idea line generates its own prompt.
+* ⛔ Optional "avoid" list used to steer generation and returned as the negative prompt.
+* 🔁 Retries with smart temperature adaptation to meet token targets.
+* 🧮 Accurate token estimation using model-specific tokenizers.
+* ⚙️ Fully configurable: model choice, token bounds, retry limits, and regeneration control.
+* 🖨️ Logs all prompts and supports forced regeneration.
 
 ---
 
 ## 🧩 How It Works
 
-1. You input one or more **ideas** (each on a new line).
-2. You can optionally add **avoid terms** — things to steer the model away from.
-3. The model uses your idea(s) to generate descriptive prompts:
-   - **Positive Prompt**: Visually rich, structured, short-phrase based prompt.
-   - **Negative Prompt**: Your avoid terms, returned exactly as you wrote them.
-4. Prompt generation is token-aware and dynamically revised if too long or too short.
-5. Each idea line gets its own generated prompt; all are merged and returned.
+1. Input one or more **idea lines** (line breaks separate them).
+2. Optionally include **avoid terms** to bias generation away from undesired concepts.
+3. The node:
+
+   * Attempts generation using your configured local model.
+   * Retries if the output is too short or too long.
+   * Logs inputs and outputs.
+4. Outputs include the final **positive prompt**, your **avoid list**, and original **idea**.
 
 ---
 
 ## 📤 Outputs
 
-| Output | Type   | Description                                                                 |
-|--------|--------|-----------------------------------------------------------------------------|
-| `prompt` | STRING | Generated **positive prompt(s)**, joined with `BREAK` separators.         |
-| `negative` | STRING | The **avoid list**, passed through directly as the negative prompt.      |
-| `idea` | STRING | The original idea(s) input, for traceability or UI purposes.                |
+| Output     | Type   | Description                                            |
+| ---------- | ------ | ------------------------------------------------------ |
+| `prompt`   | STRING | Combined positive prompt(s), separated with `BREAK`.   |
+| `negative` | STRING | Direct copy of avoid input, used as negative prompt.   |
+| `idea`     | STRING | Original idea input, for UI traceability or debugging. |
 
 ---
 
 ## 📥 Inputs / Configuration Fields
 
-| Name               | Type     | Description                                                                 |
-|--------------------|----------|-----------------------------------------------------------------------------|
-| `model`            | Dropdown | Select which locally running Ollama model to use.                          |
-| `idea`             | Text     | The concept or image prompt idea. Up to 3 lines, one idea per line.        |
-| `negative`         | Text     | Words, elements, or themes to avoid. Used during gen + passed as negative. |
-| `max_tokens`       | Int      | Max token limit (default: 75, max: 231).                                   |
-| `min_tokens`       | Int      | Minimum token requirement (default: 50).                                   |
-| `max_attempts`     | Int      | Number of tries to get an acceptable prompt per idea.                      |
-| `regen_on_each_use`| Bool     | Forces re-generation on each run, even if inputs didn’t change.            |
+| Name                | Type     | Description                                                      |
+| ------------------- | -------- | ---------------------------------------------------------------- |
+| `model`             | Dropdown | Select the model name to use (fetched from the running backend). |
+| `idea`              | Text     | One idea per line. Each generates a separate prompt.             |
+| `negative`          | Text     | Words to avoid — passed to model + used as negative prompt.      |
+| `max_tokens`        | Int      | Upper bound for output tokens (default: 75, max: 231).           |
+| `min_tokens`        | Int      | Lower bound for meaningful output (default: 50).                 |
+| `max_attempts`      | Int      | How many times to retry if generation doesn’t meet criteria.     |
+| `regen_on_each_use` | Bool     | Forces regeneration on every run, even with unchanged input.     |
 
 ---
 
@@ -79,30 +79,44 @@ negative:
 
 ## 🔁 Token-Aware Generation
 
-- Uses CLIP tokenizer (`laion/CLIP-ViT-bigG-14-laion2B-39B-b160k`) to measure tokens.
-- Tries up to `max_attempts` times to reach your `min_tokens` and not exceed `max_tokens`.
-- If prompt is too short, it adds detail; too long, it trims or rephrases.
-- Avoid terms are included in a non-generative system message and tracked between retries.
+* Token count estimated using model-specific tokenizer.
+* Retries generation using adaptive temperature — starts hot and cools with each failure.
+* Adjusts prompt by trimming or elaborating until token limits are satisfied.
+* Prompts too short or too long are discarded unless they fall within the required range.
+
+---
+
+## 🔒 Robust Logging
+
+* Logs prompts and failures to disk for traceability.
+* Logs include selected model, prompt source, token counts, and generation time.
 
 ---
 
 ## 🧠 Smart Prompt Structuring
 
-The generation system instructs the LLM to:
+Prompts follow rules enforced via system instructions to the model:
 
-- Use **short phrases**, not sentences.
-- **Avoid storytelling**, abstract ideas, and emotional language.
-- Preserve the **core visual themes** of your original idea exactly.
-- Avoid explanation or meta-commentary.
-- Support basic structure with connectors like `with`, `under`, `surrounded by`.
+* Use **short, visually descriptive phrases**, not sentences.
+* Avoid storytelling, abstract descriptions, or emotion-driven language.
+* Keep outputs grounded and aligned with original idea’s visual core.
+* Connect elements with simple language: “with”, “under”, “surrounded by”, etc.
+* Avoid repetition, overgeneralization, or verbose commentary.
 
 ---
 
 ## 🛠️ Requirements
 
-- [Ollama](https://ollama.com) installed and running locally (on `localhost:11434`).
-- ComfyUI environment.
-- Python dependencies: `requests`, `tokenizers`.
+* At least one of:
+
+  * [Ollama](https://ollama.com) running at `http://localhost:11434`
+  * [LM Studio](https://lmstudio.ai) running with JIT server enabled
+* [ComfyUI](https://github.com/comfyanonymous/ComfyUI) installed and functional
+* Python packages:
+
+  * `requests`
+  * `tokenizers`
+  * `lmstudio` (only required for LM Studio support)
 
 ---
 
@@ -115,3 +129,4 @@ MIT License
 ## ❤️ Credits
 
 Built by Neon Lightning ⚡
+Powered by open-source local LLMs, punk energy, and rat affection 🐀
