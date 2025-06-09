@@ -6,6 +6,8 @@ from pathlib import Path
 from tokenizers import Tokenizer
 import lmstudio
 import lmstudio as lms
+import threading
+import time
 
 def fetch_all_llm_models():
     all_models = []
@@ -75,7 +77,12 @@ def clear_ollama_model():
     return False
 
 ALL_AVAILABLE_MODELS = fetch_all_llm_models()
-
+try:
+    lmstudio_model = lms.llm()
+    lmstudio_model.unload()
+    print("[LM Studio] Unloaded any previously running model at startup.")
+except Exception as e:
+    print(f"[LM Studio] No model to unload or error unloading at startup: {e}")
 clear_ollama_model()
 try:
     tokenizer = Tokenizer.from_pretrained("laion/CLIP-ViT-bigG-14-laion2B-39B-b160k")
@@ -115,6 +122,7 @@ class OllamaPromptFromIdea:
         return float("NaN")
 
     def generate_prompt(self, model, idea, negative, max_tokens, min_tokens, max_attempts, regen_on_each_use, just_use_idea):
+        PREDICTION_TIMEOUT = 90
         if just_use_idea:
             print("[LLM Prompt Node] 'Just Use Idea' is enabled. Skipping LLM generation.")
             return (idea, negative, idea)
@@ -211,13 +219,12 @@ class OllamaPromptFromIdea:
                             "stream": False,
                             "options": {
                                 "temperature": adaptive_temperature,
-                                "num_ctx": 4096
                             }
                         }
                         response = requests.post(
                             api_url,
                             json=payload,
-                            timeout=90
+                            timeout=PREDICTION_TIMEOUT
                         )
                         response.raise_for_status()
                         raw_result = response.json().get("response", "").strip()
@@ -226,20 +233,28 @@ class OllamaPromptFromIdea:
                             raise ConnectionError("LM Studio LLM instance not initialized for API call.")
                         chat = lms.Chat(system_message_content)
                         chat.add_user_message(user_message_content)
-                        response_message = lm_studio_llm_instance.respond(
-                            chat,
-                            on_message=chat.append,
-                        )
-                        if isinstance(response_message, str):
-                            raw_result = response_message.strip()
-                        elif hasattr(response_message, "content"):
-                            raw_result = (
-                                response_message.content[0].text.strip()
-                                if response_message.content and hasattr(response_message.content[0], "text")
-                                else str(response_message).strip()
-                            )
-                        else:
-                            raw_result = str(response_message).strip()
+                        stream = lm_studio_llm_instance.respond_stream(chat, on_message=chat.append)
+                        cancelled = False
+                        def timeout_handler():
+                            nonlocal cancelled
+                            cancelled = True
+                            stream.cancel()
+                        timer = threading.Timer(PREDICTION_TIMEOUT, timeout_handler)
+                        timer.start()
+                        try:
+                            for _ in stream:
+                                if cancelled:
+                                    break
+                            if not cancelled:
+                                result_obj = stream.result()
+                                if hasattr(result_obj, "text"):
+                                    raw_result = result_obj.text.strip()
+                                else:
+                                    raw_result = str(result_obj).strip()
+                            else:
+                                raise TimeoutError("LM Studio response generation cancelled due to timeout.")
+                        finally:
+                            timer.cancel()
                     token_count = estimate_tokens(raw_result)
                     print(f"Idea: {idx + 1} Attempt: {attempt}/{max_attempts} LLM result: {raw_result}")
                     print(f"→ Token count: {token_count} (target: {min_tokens}–{max_tokens})")
@@ -289,6 +304,21 @@ class OllamaPromptFromIdea:
                         if is_ollama_model:
                             clear_ollama_model()
                         elif is_lmstudio_model and lm_studio_llm_instance:
+                            model = lms.llm()
+                            model.unload()
+                        break
+                except TimeoutError as e:
+                    if timeout_number < 5:
+                        print(f"⚠️ Attempt {attempt}/{max_attempts} LM Studio stream timeout. Retrying...\n")
+                        time.sleep(1)
+                        timeout_number += 1
+                        continue
+                    else:
+                        error_msg = f"Too many LM Studio timeouts (5). Falling back to idea."
+                        print(f"❌ {error_msg}")
+                        generated_prompts.append(sub_idea)
+                        timeout_number = 0
+                        if is_lmstudio_model and lm_studio_llm_instance:
                             model = lms.llm()
                             model.unload()
                         break
