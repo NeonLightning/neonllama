@@ -288,6 +288,9 @@ class OllamaPromptFromIdea:
                         timeout_number = 0
                         if is_ollama_model:
                             clear_ollama_model()
+                        elif is_lmstudio_model and lm_studio_llm_instance:
+                            model = lms.llm()
+                            model.unload()
                         break
                 except Exception as e:
                     error_msg = f"[LLM Error] {str(e)}"
@@ -298,7 +301,9 @@ class OllamaPromptFromIdea:
                 timeout_number = 0
                 if is_ollama_model:
                     clear_ollama_model()
-                # No unload for LM Studio needed here either
+                elif is_lmstudio_model and lm_studio_llm_instance:
+                    model = lms.llm()
+                    model.unload()
                 generated_prompts.append(sub_idea)
         final_prompt = " BREAK ".join(generated_prompts)
         print(f"\nFinal Generated Prompt: {final_prompt}")
