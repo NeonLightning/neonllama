@@ -197,19 +197,39 @@ class OllamaPromptFromIdea:
                         if token_count_last_output > max_tokens:
                             user_message_content = (
                                 f"The following prompt is too long (over {max_tokens} tokens). "
-                                f"Revise it to be shorter but keep visual richness and specificity and all on one line."
+                                f"Revise it to be shorter but keep visual richness and specificity. "
                                 f"Use compact phrases or brief expressions with light structure. "
+                                f"Avoid long sentences or reinterpreting the concept. "
+                                f"Use only short descriptions. and don't describe feeling. "
+                                f"{avoid_clause}"
+                                f"Reminder: You MUST preserve all core themes of the original idea. The original idea is: {sub_idea} DO NOT CHANGE THE IDEA."
+                                f"you MUST NOT ever talk about your thought process or explain how you generated the prompt."
                                 f"\nPrevious prompt: {last_output}\nShorter prompt:"
                             )
                         elif token_count_last_output < min_tokens:
                             user_message_content = (
                                 f"The following prompt is too short (under {min_tokens} tokens). "
-                                f"Expand it by adding specific, vivid imagery using short but rich phrases and all on one line."
+                                f"Expand it by adding specific, vivid imagery using short but rich phrases. "
+                                f"Include unique textures, lighting effects, environments, and visual motifs. "
+                                f"Light structure is allowed: use connectors like 'with', 'under', 'surrounded by', etc. "
+                                f"Do not repeat phrases or rearrange words – add new coherent, visual material. "
+                                f"Use only short descriptions. and don't describe feeling. "
+                                f"Avoid full sentences or storylines. "
+                                f"{avoid_clause}"
+                                f"Reminder: You MUST preserve all core themes of the original idea. The original idea is: {sub_idea} DO NOT CHANGE THE IDEA."
+                                f"you MUST NOT ever talk about your thought process or explain how you generated the prompt."
                                 f"\nPrevious prompt: {last_output}\nExpanded prompt:"
                             )
                         else:
                             user_message_content = (
-                                f"Revise the following prompt to improve clarity and vividness, while keeping all original ideas intact and all on one line."
+                                f"Revise the following prompt to improve clarity and vividness, while keeping all original ideas intact. "
+                                f"You may slightly structure the phrases for better flow. "
+                                f"Do not add new concepts or remove core elements. "
+                                f"Use only short descriptions. and don't describe feeling. "
+                                f"Keep it between {min_tokens}–{max_tokens} tokens. "
+                                f"{avoid_clause}"
+                                f"Reminder: You MUST preserve all core themes of the original idea. The original idea is: {sub_idea} DO NOT CHANGE THE IDEA."
+                                f"you MUST NOT ever talk about your thought process or explain how you generated the prompt."
                                 f"\nPrevious prompt: {last_output}\nRevised prompt:"
                             )
                         system_message_content += avoid_clause
