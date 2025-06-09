@@ -134,7 +134,7 @@ class OllamaPromptFromIdea:
         if not is_ollama_model and not is_lmstudio_model:
             print(f"[LLM Prompt Node] Error: Invalid model selection prefix for '{model}'. Falling back to idea.")
             return (idea, negative, idea)
-        actual_model_name = model.split(":")[1] if ":" in model else model
+        actual_model_name = model.split(":", 1)[1] if ":" in model else model
         print(f"[LLM Prompt Node] Using model: {actual_model_name} from {'Ollama' if is_ollama_model else 'LM Studio'}")
         idea_list = [i.strip() for i in idea.strip().split("\n") if i.strip()]
         total_attempts = len(idea_list) * max_attempts
