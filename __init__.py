@@ -4,66 +4,103 @@ import time
 import requests.exceptions
 from pathlib import Path
 from tokenizers import Tokenizer
+import lmstudio
+import lmstudio as lms
 
-def fetch_ollama_models():
-    url = "http://localhost:11434/api/tags"
+def fetch_all_llm_models():
+    all_models = []
+    ollama_url = "http://localhost:11434/api/tags"
     try:
-        res = requests.get(url, timeout=5)
+        res = requests.get(ollama_url, timeout=5)
         res.raise_for_status()
         data = res.json()
-        models = [m["model"] for m in data.get("models", [])]
-        print(f"[Ollama] Fetched models: {models}")
-        return models if models else [""]
+        ollama_models = [m["model"] for m in data.get("models", [])]
+        print(f"[Ollama] Fetched models: {ollama_models}")
+        all_models.extend([f"ollama:{model}" for model in ollama_models])
+    except requests.exceptions.ConnectionError:
+        print("[Ollama] Failed to connect to Ollama. Is the server running on localhost:11434?")
     except Exception as e:
         print(f"[Ollama] Failed to fetch models: {e}")
-        return [""]
-
-OLLAMA_MODELS = fetch_ollama_models()
-
-tokenizer = Tokenizer.from_pretrained("laion/CLIP-ViT-bigG-14-laion2B-39B-b160k")
-
-def estimate_tokens(text):
-    return tokenizer.encode(text).ids
+    try:
+        client = lms.Client()
+        downloaded_lmstudio_models = client.list_downloaded_models()
+        lmstudio_llm_model_keys = []
+        if not downloaded_lmstudio_models:
+            print("No downloaded models found in your LM Studio installation.")
+        else:
+            for model_obj in downloaded_lmstudio_models:
+                if isinstance(model_obj, lms.DownloadedLlm):
+                    lmstudio_llm_model_keys.append(model_obj.model_key)
+        print(f"[LM Studio] Fetched LLM model keys: {lmstudio_llm_model_keys}")
+        all_models.extend([f"lmstudio:{key}" for key in lmstudio_llm_model_keys])
+    except requests.exceptions.ConnectionError:
+        print("[LM Studio] Failed to connect to LM Studio. Is the server running on localhost:1234?")
+    except Exception as e:
+        print(f"[LM Studio] Failed to fetch LM Studio models: {e}")
+    if not all_models:
+        print("[Global Model Fetch] No models found from Ollama or LM Studio. Please check servers.")
+        return ["No models found - ensure Ollama or LM Studio is running."]
+    else:
+        print(f"[Global Model Fetch] Combined available models: {all_models}")
+        return all_models
 
 def clear_ollama_model():
     try:
-        result = subprocess.run(["ollama", "ps"], capture_output=True, text=True, check=True)
+        result = subprocess.run(["ollama", "ps"], capture_output=True, text=True, check=False, timeout=5)
+        if result.returncode != 0:
+            print(f"[Ollama] 'ollama ps' command failed: {result.stderr.strip()}")
+            return False
         lines = result.stdout.strip().splitlines()
-        if len(lines) < 2:
-            print("No model is currently loaded.")
+        if len(lines) < 2 or "MODEL" not in lines[0]:
+            print("[Ollama] No Ollama model is currently loaded or 'ollama ps' output is unexpected.")
             return False
         model_name = lines[1].split()[0]
         if not model_name:
-            print("Could not determine model name.")
+            print("[Ollama] Could not determine Ollama model name from 'ollama ps' output.")
             return False
         res = requests.post(
             "http://localhost:11434/api/generate",
-            json={"model": model_name, "keep_alive": 0},
+            json={"model": model_name, "keep_alive": "0m"},
             timeout=10
         )
         res.raise_for_status()
-        print(f"Unloaded model: {model_name}")
+        print(f"[Ollama] Unloaded model: {model_name}")
         return True
     except subprocess.CalledProcessError as e:
-        print(f"Error running 'ollama ps': {e}")
+        print(f"[Ollama] Error running 'ollama ps': {e}")
     except requests.exceptions.RequestException as e:
-        print(f"Error sending unload request: {e}")
+        print(f"[Ollama] Error sending unload request: {e}")
+    except Exception as e:
+        print(f"[Ollama] An unexpected error occurred during Ollama model clearing: {e}")
     return False
 
+ALL_AVAILABLE_MODELS = fetch_all_llm_models()
+
 clear_ollama_model()
+try:
+    tokenizer = Tokenizer.from_pretrained("laion/CLIP-ViT-bigG-14-laion2B-39B-b160k")
+except Exception as e:
+    print(f"Warning: Could not load tokenizer. Prompt token estimation will not work: {e}")
+    tokenizer = None
+
+def estimate_tokens(text):
+    if tokenizer:
+        return len(tokenizer.encode(text).ids)
+    else:
+        return len(text.split())
 
 class OllamaPromptFromIdea:
     @classmethod
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "model": (OLLAMA_MODELS, {"tooltip": "Select the Ollama model to generate prompts with."}),
-                "idea": ("STRING", {"multiline": True, "default": "futuristic cyberpunk city", "tooltip": "Enter the core concept or theme for your prompt to ollama\nYou can have seperated ideas if you have a hard return.\nOnly use up to 3 lines though. to a maximum. of 231 tokens."}),
-                "negative": ("STRING", {"multiline": True, "default": "", "tooltip": "Words or themes to exclude from the prompt.(non ollama prompting)"}),
+                "model": (ALL_AVAILABLE_MODELS, {"tooltip": "Select the LLM model (Ollama or LM Studio) to generate prompts with."}),
+                "idea": ("STRING", {"multiline": True, "default": "futuristic cyberpunk city", "tooltip": "Enter the core concept or theme for your prompt.\nYou can have separated ideas if you have a hard return.\nOnly use up to 3 lines though, to a maximum of 231 tokens."}),
+                "negative": ("STRING", {"multiline": True, "default": "", "tooltip": "Words or themes to exclude from the prompt (used by Stable Diffusion, not LLM).", "dynamicPrompts": False}),
                 "max_tokens": ("INT", {"default": 75, "min": 10, "max": 231, "tooltip": "Maximum token length for the generated prompt."}),
                 "min_tokens": ("INT", {"default": 50, "min": 10, "max": 230, "tooltip": "Minimum token length for the generated prompt."}),
                 "max_attempts": ("INT", {"default": 30, "min": 1, "max": 200, "tooltip": "Number of attempts to generate a prompt fitting token limits."}),
-                "regen_on_each_use": ("BOOLEAN", {"default": True, "tooltip": "Force regeneration on each node execution.(doesn't matter if just_use_idea is on)"}),
+                "regen_on_each_use": ("BOOLEAN", {"default": True, "tooltip": "Force regeneration on each node execution (doesn't matter if just_use_idea is on)."}),
                 "just_use_idea": ("BOOLEAN", {"default": True, "tooltip": "Skip Generating and just use idea as prompt."}),
             }
         }
@@ -71,7 +108,7 @@ class OllamaPromptFromIdea:
     RETURN_TYPES = ("STRING", "STRING", "STRING",)
     RETURN_NAMES = ("prompt", "negative", "idea")
     FUNCTION = "generate_prompt"
-    CATEGORY = "Ollama"
+    CATEGORY = "LLM Prompts"
 
     @classmethod
     def IS_CHANGED(cls, **kwargs):
@@ -79,26 +116,42 @@ class OllamaPromptFromIdea:
 
     def generate_prompt(self, model, idea, negative, max_tokens, min_tokens, max_attempts, regen_on_each_use, just_use_idea):
         if just_use_idea:
+            print("[LLM Prompt Node] 'Just Use Idea' is enabled. Skipping LLM generation.")
             return (idea, negative, idea)
         if not negative:
             negative = ""
+        is_ollama_model = model.startswith("ollama:")
+        is_lmstudio_model = model.startswith("lmstudio:")
+        if not is_ollama_model and not is_lmstudio_model:
+            print(f"[LLM Prompt Node] Error: Invalid model selection prefix for '{model}'. Falling back to idea.")
+            return (idea, negative, idea)
+        actual_model_name = model.split(":")[1] if ":" in model else model
+        print(f"[LLM Prompt Node] Using model: {actual_model_name} from {'Ollama' if is_ollama_model else 'LM Studio'}")
         idea_list = [i.strip() for i in idea.strip().split("\n") if i.strip()]
+        if not idea_list:
+            print("[LLM Prompt Node] No valid ideas provided. Returning empty prompt.")
+            return ("", negative, "")
         generated_prompts = []
-        prompt_log_file = Path("ollama_prompt_log.txt")
+        prompt_log_file = Path("llm_generated_prompt_log.txt")
         if not regen_on_each_use:
             try:
-                with open(prompt_log_file, "r", encoding="utf-8") as f:
-                    file_prompt = f.read().strip()
-                    print("[Ollama] Loaded prompt from file instead of regenerating.")
+                if prompt_log_file.exists():
+                    with open(prompt_log_file, "r", encoding="utf-8") as f:
+                        file_prompt = f.read().strip()
+                    print("[LLM Prompt Node] Loaded prompt from file instead of regenerating.")
                     return (file_prompt, negative, idea)
-            except FileNotFoundError:
-                print("[Ollama] Prompt file not found. Falling back to input ideas.")
-                fallback_prompt = " BREAK ".join(idea_list)
-                return (fallback_prompt, negative, idea)
+                else:
+                    print("[LLM Prompt Node] Prompt log file not found. Generating new prompt.")
             except Exception as e:
-                print(f"[Ollama] Failed to load cached prompt file: {e}")
-                fallback_prompt = " BREAK ".join(idea_list)
-                return (fallback_prompt, negative, idea)
+                print(f"[LLM Prompt Node] Failed to load cached prompt file: {e}. Generating new prompt.")
+        lm_studio_llm_instance = None
+        if is_lmstudio_model:
+            try:
+                lm_studio_client = lms.Client()
+                lm_studio_llm_instance = lm_studio_client.llm.model(actual_model_name)
+            except Exception as e:
+                print(f"[LLM Prompt Node] Error initializing LM Studio client or model: {e}")
+                return (idea, negative, idea)
         for idx, sub_idea in enumerate(idea_list):
             print(f"\n🧠 Generating prompt for idea {idx + 1}: '{sub_idea}'")
             last_output = None
@@ -110,67 +163,85 @@ class OllamaPromptFromIdea:
                 try:
                     avoid_text = " | ".join(used_phrases)
                     avoid_clause = ""
-                    if avoid_text.strip() and (negative.strip() or idx > 0):
-                        avoid_clause = f"\nABSOLUTELY DO NOT use or repeat any of the following phrases or content {avoid_text}"
-                    if last_output is None:
-                        system_prompt = (
-                            f"Convert the following idea into a richly descriptive, visually detailed image prompt for Stable Diffusion XL. "
-                            f"Use short phrases, and allow natural connectors like 'with', 'and', or 'under'. "
-                            f"Focus on concrete, vivid visual elements – not abstract concepts. "
-                            f"Use multi-word descriptions only where needed. "
-                            f"Do not include full sentences, storytelling, or subjective opinions. "
-                            f"Use only short descriptions. and don't describe feeling. "
-                            f"Use an appropriate amount of commas to separate ideas for a image prompt. no excessive ideas."
-                            f"Target between {min_tokens} and {max_tokens} tokens and all on one line."
-                            f"{avoid_clause}"
-                            f"Reminder: You MUST preserve all core themes of the original idea. The original idea is: {sub_idea} DO NOT CHANGE THE IDEA."
-                            f"you MUST NOT ever talk about your thought process or explain how you generated the prompt."
-                            f"\nIdea: {sub_idea}\nPrompt:"
-                        )
-                    else:
-                        token_count = len(estimate_tokens(last_output))
-                        if token_count > max_tokens:
-                            system_prompt = (
+                    if avoid_text.strip():
+                        avoid_clause = f"\nABSOLUTELY DO NOT use or repeat any of the following phrases or content: {avoid_text}."
+                    system_message_content = (
+                        f"You are a helpful assistant that generates detailed image prompts. "
+                        f"Convert the following idea into a richly descriptive, visually detailed image prompt for Stable Diffusion XL. "
+                        f"Use short phrases, and allow natural connectors like 'with', 'and', 'or', 'under'. "
+                        f"Focus on concrete, vivid visual elements – not abstract concepts. "
+                        f"Use multi-word descriptions only where needed. "
+                        f"Do not include full sentences, storytelling, or subjective opinions. "
+                        f"Use only short descriptions. and don't describe feeling. "
+                        f"Use an appropriate amount of commas to separate ideas for an image prompt. no excessive ideas."
+                        f"Target between {min_tokens} and {max_tokens} tokens and all on one line."
+                        f"{avoid_clause}"
+                        f"Reminder: You MUST preserve all core themes of the original idea. The original idea is: {sub_idea} DO NOT CHANGE THE IDEA."
+                        f"you MUST NOT ever talk about your thought process or explain how you generated the prompt."
+                    )
+                    user_message_content = f"Idea: {sub_idea}\nPrompt:"
+                    if last_output is not None:
+                        token_count_last_output = estimate_tokens(last_output)
+                        if token_count_last_output > max_tokens:
+                            user_message_content = (
                                 f"The following prompt is too long (over {max_tokens} tokens). "
                                 f"Revise it to be shorter but keep visual richness and specificity and all on one line."
                                 f"Use compact phrases or brief expressions with light structure. "
-                                f"{avoid_clause}"
-                                f"you MUST NOT ever talk about your thought process or explain how you generated the prompt."
-                                f"Reminder: You MUST preserve all core themes of the original idea. The original idea is: {sub_idea} DO NOT CHANGE THE IDEA."
                                 f"\nPrevious prompt: {last_output}\nShorter prompt:"
                             )
-                        elif token_count < min_tokens:
-                            system_prompt = (
+                        elif token_count_last_output < min_tokens:
+                            user_message_content = (
                                 f"The following prompt is too short (under {min_tokens} tokens). "
                                 f"Expand it by adding specific, vivid imagery using short but rich phrases and all on one line."
-                                f"{avoid_clause}"
-                                f"you MUST NOT ever talk about your thought process or explain how you generated the prompt."
-                                f"Reminder: You MUST preserve all core themes of the original idea. The original idea is: {sub_idea} DO NOT CHANGE THE IDEA."
                                 f"\nPrevious prompt: {last_output}\nExpanded prompt:"
                             )
                         else:
-                            system_prompt = (
+                            user_message_content = (
                                 f"Revise the following prompt to improve clarity and vividness, while keeping all original ideas intact and all on one line."
-                                f"{avoid_clause}"
-                                f"Reminder: You MUST preserve all core themes of the original idea. The original idea is: {sub_idea} DO NOT CHANGE THE IDEA."
                                 f"\nPrevious prompt: {last_output}\nRevised prompt:"
                             )
-                    response = requests.post(
-                        "http://localhost:11434/api/generate",
-                        json={
-                            "model": model,
-                            "prompt": system_prompt,
+                        system_message_content += avoid_clause
+                    adaptive_temperature = min(0.1 + ((attempt // 2) * 0.1), 0.9)
+                    raw_result = ""
+                    if is_ollama_model:
+                        api_url = "http://localhost:11434/api/generate"
+                        payload = {
+                            "model": actual_model_name,
+                            "prompt": system_message_content + "\n" + user_message_content,
                             "stream": False,
                             "options": {
-                                "temperature": 0.3
+                                "temperature": adaptive_temperature,
+                                "num_ctx": 4096
                             }
-                        },
-                        timeout=60,
-                    )
-                    response.raise_for_status()
-                    raw_result = response.json().get("response", "").strip()
-                    token_count = len(estimate_tokens(raw_result))
-                    print(f"Idea: {idx + 1} Attempt: {attempt}/{max_attempts} Ollama result: {raw_result}")
+                        }
+                        response = requests.post(
+                            api_url,
+                            json=payload,
+                            timeout=90
+                        )
+                        response.raise_for_status()
+                        raw_result = response.json().get("response", "").strip()
+                    elif is_lmstudio_model:
+                        if lm_studio_llm_instance is None:
+                            raise ConnectionError("LM Studio LLM instance not initialized for API call.")
+                        chat = lms.Chat(system_message_content)
+                        chat.add_user_message(user_message_content)
+                        response_message = lm_studio_llm_instance.respond(
+                            chat,
+                            on_message=chat.append,
+                        )
+                        if isinstance(response_message, str):
+                            raw_result = response_message.strip()
+                        elif hasattr(response_message, "content"):
+                            raw_result = (
+                                response_message.content[0].text.strip()
+                                if response_message.content and hasattr(response_message.content[0], "text")
+                                else str(response_message).strip()
+                            )
+                        else:
+                            raw_result = str(response_message).strip()
+                    token_count = estimate_tokens(raw_result)
+                    print(f"Idea: {idx + 1} Attempt: {attempt}/{max_attempts} LLM result: {raw_result}")
                     print(f"→ Token count: {token_count} (target: {min_tokens}–{max_tokens})")
                     if last_output is not None and raw_result.strip() == last_output.strip():
                         print("⚠️ Prompt identical to last attempt. Restarting generation from scratch...\n")
@@ -182,7 +253,11 @@ class OllamaPromptFromIdea:
                         used_phrases.append(raw_result)
                         print("✔️ Prompt accepted.")
                         timeout_number = 0
-                        clear_ollama_model()
+                        if is_ollama_model:
+                            clear_ollama_model()
+                        elif is_lmstudio_model and lm_studio_llm_instance:
+                            model = lms.llm()
+                            model.unload()
                         generated_prompts.append(raw_result)
                         break
                     last_output = raw_result
@@ -191,32 +266,42 @@ class OllamaPromptFromIdea:
                     time.sleep(0.5)
                 except requests.exceptions.HTTPError as e:
                     if e.response.status_code == 500:
-                        print(f"⚠️ Attempt {attempt}/{max_attempts} 500 error. Retrying...\n")
-                        clear_ollama_model()
+                        print(f"⚠️ Attempt {attempt}/{max_attempts} HTTP 500 error. Retrying...\n")
+                        if is_ollama_model:
+                            clear_ollama_model()
                         time.sleep(1)
-                        continue                    
+                        continue
+                    else:
+                        error_msg = f"[LLM API Error] HTTP Error {e.response.status_code}: {e.response.text}"
+                        print(error_msg)
+                        return (error_msg, negative, idea)
                 except requests.exceptions.Timeout:
-                    if timeout_number < 6:
+                    if timeout_number < 5:
                         print(f"⚠️ Attempt {attempt}/{max_attempts} timed out. Retrying...\n")
                         time.sleep(1)
                         timeout_number += 1
                         continue
                     else:
                         error_msg = f"Too many timeouts (5). Falling back to idea."
+                        print(f"❌ {error_msg}")
                         generated_prompts.append(sub_idea)
                         timeout_number = 0
+                        if is_ollama_model:
+                            clear_ollama_model()
                         break
                 except Exception as e:
-                    error_msg = f"[Ollama Error] {str(e)}"
+                    error_msg = f"[LLM Error] {str(e)}"
                     print(error_msg)
                     return (error_msg, negative, idea)
             else:
                 print(f"❌ Max attempts for idea '{sub_idea}' reached. Using original as fallback.")
                 timeout_number = 0
-                clear_ollama_model()
+                if is_ollama_model:
+                    clear_ollama_model()
+                # No unload for LM Studio needed here either
                 generated_prompts.append(sub_idea)
         final_prompt = " BREAK ".join(generated_prompts)
-        print(f"output of: {final_prompt}")
+        print(f"\nFinal Generated Prompt: {final_prompt}")
         try:
             with open(prompt_log_file, "w+", encoding="utf-8") as f:
                 f.write(final_prompt)
@@ -234,5 +319,5 @@ NODE_CLASS_MAPPINGS = {
     "OllamaPromptFromIdea": OllamaPromptFromIdea,
 }
 NODE_DISPLAY_NAME_MAPPINGS = {
-    "OllamaPromptFromIdea": "🧠 Ollama Prompt From Idea",
+    "OllamaPromptFromIdea": "🧠 Ollama & LM Studio Prompt From Idea",
 }
