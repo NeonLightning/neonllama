@@ -254,7 +254,7 @@ class OllamaPromptFromIdea:
                             raise ConnectionError("LM Studio LLM instance not initialized for API call.")
                         chat = lms.Chat(system_message_content)
                         chat.add_user_message(user_message_content)
-                        stream = lm_studio_llm_instance.respond_stream(chat, on_message=chat.append)
+                        stream = lm_studio_llm_instance.respond_stream(chat, config={"repeatPenalty":1.3, "temperature":adaptive_temperature,}, on_message=chat.append)
                         cancelled = False
                         def timeout_handler():
                             nonlocal cancelled
