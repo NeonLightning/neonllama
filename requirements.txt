@@ -1,3 +1,2 @@
-requests>=2.28.0
-tokenizers>=0.13.3
-typing-extensions>=4.5.0
+tokenizers
+lmstudio
