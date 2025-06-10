@@ -1,3 +1,4 @@
+import random
 import subprocess
 import requests
 import time
@@ -176,73 +177,69 @@ class OllamaPromptFromIdea:
                     avoid_text = " | ".join(used_phrases)
                     avoid_clause = ""
                     if avoid_text.strip():
-                        avoid_clause = f"\nABSOLUTELY DO NOT use or repeat any of the following phrases or content: {avoid_text}."
+                        avoid_clause = f"\nABSOLUTELY DO NOT use or repeat any of the following phrases or content: {avoid_text}." if avoid_text.strip() else ""
                     system_message_content = (
-                        f"You are a helpful assistant that generates detailed image prompts. "
-                        f"Convert the following idea into a richly descriptive, visually detailed image prompt for Stable Diffusion XL. "
-                        f"Use short phrases, and allow natural connectors like 'with', 'and', 'or', 'under'. "
-                        f"Focus on concrete, vivid visual elements – not abstract concepts. "
-                        f"Use multi-word descriptions only where needed. "
-                        f"Do not include full sentences, storytelling, or subjective opinions. "
-                        f"Use only short descriptions. and don't describe feeling. "
-                        f"Use an appropriate amount of commas to separate ideas for an image prompt. no excessive ideas."
-                        f"Target between {min_tokens} and {max_tokens} tokens and all on one line."
+                        f"You are a specialized prompt generator for Stable Diffusion XL. "
+                        f"Your task is to convert a raw idea into a single-line, visually dense, and concrete image prompt. "
+                        f"Use only short, descriptive fragments – no full sentences, no emotions, no abstract terms, no opinions. "
+                        f"Focus strictly on visible elements: subject appearance, setting, lighting, objects, materials, and structure. "
+                        f"Use connectors like 'with', 'under', 'surrounded by', but avoid excessive chaining. "
+                        f"Sort ideas by visual importance, from main subject to secondary elements. "
+                        f"Separate all ideas with commas. In order of importance."
+                        f"The entire prompt must be between {min_tokens} and {max_tokens} SDXL tokens, one single line. "
                         f"{avoid_clause}"
-                        f"Reminder: You MUST preserve all core themes of the original idea. The original idea is: {sub_idea} DO NOT CHANGE THE IDEA."
-                        f"you MUST NOT ever talk about your thought process or explain how you generated the prompt."
+                        f"DO NOT explain your reasoning. DO NOT change or reinterpret the original idea. Preserve it exactly: {sub_idea}"
+                        f"Never use storytelling, feelings, or narrative context."
+                        f"Your output must be suitable for direct input into an AI image generation model."
+                        f"Give a new idea from any previous"
                     )
                     user_message_content = f"Idea: {sub_idea}\nPrompt:"
                     if last_output is not None:
                         token_count_last_output = estimate_tokens(last_output)
                         if token_count_last_output > max_tokens:
                             user_message_content = (
-                                f"The following prompt is too long (over {max_tokens} tokens). "
-                                f"Revise it to be shorter but keep visual richness and specificity. "
-                                f"Use compact phrases or brief expressions with light structure. "
-                                f"Avoid long sentences or reinterpreting the concept. "
-                                f"Use only short descriptions. and don't describe feeling. "
+                                f"\nOriginal prompt: {sub_idea}\n"
+                                f"The following prompt is too long it needs to be slightly shorter."
+                                f"Shorten it without removing detail. Compress phrases, remove redundancy. "
                                 f"{avoid_clause}"
-                                f"Reminder: You MUST preserve all core themes of the original idea. The original idea is: {sub_idea} DO NOT CHANGE THE IDEA."
-                                f"you MUST NOT ever talk about your thought process or explain how you generated the prompt."
-                                f"\nPrevious prompt: {last_output}\nShorter prompt:"
+                                f"Never use storytelling, feelings, or narrative context."
+                                f"Your output must be suitable for direct input into an AI image generation model."
+                                f"Give a new idea from the previous"
                             )
                         elif token_count_last_output < min_tokens:
                             user_message_content = (
-                                f"The following prompt is too short (under {min_tokens} tokens). "
-                                f"Expand it by adding specific, vivid imagery using short but rich phrases. "
-                                f"Include unique textures, lighting effects, environments, and visual motifs. "
-                                f"Light structure is allowed: use connectors like 'with', 'under', 'surrounded by', etc. "
-                                f"Do not repeat phrases or rearrange words – add new coherent, visual material. "
-                                f"Use only short descriptions. and don't describe feeling. "
-                                f"Avoid full sentences or storylines. "
+                                f"\nOriginal prompt: {sub_idea}\n"
+                                f"The following prompt is too short it needs to be slightly longer.. "
+                                f"Expand it with vivid, concrete visual details. Add setting, lighting, textures, or objects. "
+                                f"Do NOT repeat. "
                                 f"{avoid_clause}"
-                                f"Reminder: You MUST preserve all core themes of the original idea. The original idea is: {sub_idea} DO NOT CHANGE THE IDEA."
-                                f"you MUST NOT ever talk about your thought process or explain how you generated the prompt."
-                                f"\nPrevious prompt: {last_output}\nExpanded prompt:"
+                                f"Never use storytelling, feelings, or narrative context."
+                                f"Your output must be suitable for direct input into an AI image generation model."
+                                f"Give a new idea from the previous"
                             )
                         else:
                             user_message_content = (
-                                f"Revise the following prompt to improve clarity and vividness, while keeping all original ideas intact. "
-                                f"You may slightly structure the phrases for better flow. "
-                                f"Do not add new concepts or remove core elements. "
-                                f"Use only short descriptions. and don't describe feeling. "
-                                f"Keep it between {min_tokens}–{max_tokens} tokens. "
+                                f"\nOriginal prompt: {sub_idea}\n"
+                                f"Improve the following prompt for visual clarity and composition. "
+                                f"Structure for better flow, but stay under {max_tokens} tokens. "
                                 f"{avoid_clause}"
-                                f"Reminder: You MUST preserve all core themes of the original idea. The original idea is: {sub_idea} DO NOT CHANGE THE IDEA."
-                                f"you MUST NOT ever talk about your thought process or explain how you generated the prompt."
-                                f"\nPrevious prompt: {last_output}\nRevised prompt:"
+                                f"Never use storytelling, feelings, or narrative context."
+                                f"Your output must be suitable for direct input into an AI image generation model."
+                                f"Give a new idea from the previous"
                             )
                         system_message_content += avoid_clause
-                    adaptive_temperature = min(0.1 + ((attempt // 2) * 0.1), 0.9)
+                    adaptive_temperature = 0.1 + (random.random() * (0.9 - 0.1))
                     raw_result = ""
                     if is_ollama_model:
                         api_url = "http://localhost:11434/api/generate"
+                        random_seed = random.randint(0, 1000000000)
                         payload = {
                             "model": actual_model_name,
                             "prompt": system_message_content + "\n" + user_message_content,
                             "stream": False,
                             "options": {
                                 "temperature": adaptive_temperature,
+                                "seed": random_seed,
                             }
                         }
                         response = requests.post(
@@ -349,6 +346,11 @@ class OllamaPromptFromIdea:
                 except Exception as e:
                     error_msg = f"[LLM Error] {str(e)}"
                     print(error_msg)
+                    if is_ollama_model:
+                        clear_ollama_model()
+                    elif is_lmstudio_model and lm_studio_llm_instance:
+                        model = lms.llm()
+                        model.unload()
                     return (error_msg, negative, idea)
             else:
                 print(f"❌ Max attempts for idea '{sub_idea}' reached. Using original as fallback.")
