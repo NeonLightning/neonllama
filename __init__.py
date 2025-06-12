@@ -106,11 +106,12 @@ class OllamaPromptFromIdea:
                 "model": (ALL_AVAILABLE_MODELS, {"tooltip": "Select the LLM model (Ollama or LM Studio) to generate prompts with."}),
                 "idea": ("STRING", {"multiline": True, "default": "futuristic cyberpunk city", "tooltip": "Enter the core concept or theme for your prompt.\nYou can have separated ideas if you have a hard return.\nOnly use up to 3 lines though, to a maximum of 231 tokens."}),
                 "negative": ("STRING", {"multiline": True, "default": "", "tooltip": "Words or themes to exclude from the prompt (used by Stable Diffusion, not LLM).", "dynamicPrompts": False}),
-                "max_tokens": ("INT", {"default": 75, "min": 10, "max": 231, "tooltip": "Maximum token length for the generated prompt."}),
-                "min_tokens": ("INT", {"default": 50, "min": 10, "max": 230, "tooltip": "Minimum token length for the generated prompt."}),
+                "max_tokens": ("INT", {"default": 75, "min": 10, "max": 1024, "tooltip": "Maximum token length for the generated prompt."}),
+                "min_tokens": ("INT", {"default": 50, "min": 10, "max": 1024, "tooltip": "Minimum token length for the generated prompt."}),
                 "max_attempts": ("INT", {"default": 30, "min": 1, "max": 200, "tooltip": "Number of attempts to generate a prompt fitting token limits."}),
                 "regen_on_each_use": ("BOOLEAN", {"default": True, "tooltip": "Force regeneration on each node execution (doesn't matter if just_use_idea is on)."}),
                 "just_use_idea": ("BOOLEAN", {"default": True, "tooltip": "Skip Generating and just use idea as prompt."}),
+                "exclude_comma": ("BOOLEAN", {"default": False, "tooltip": "Disables commas and sentence removal suggesting."}),
             }
         }
 
@@ -123,8 +124,8 @@ class OllamaPromptFromIdea:
     def IS_CHANGED(cls, **kwargs):
         return float("NaN")
 
-    def generate_prompt(self, model, idea, negative, max_tokens, min_tokens, max_attempts, regen_on_each_use, just_use_idea):
-        PREDICTION_TIMEOUT = 90
+    def generate_prompt(self, model, idea, negative, max_tokens, min_tokens, max_attempts, regen_on_each_use, just_use_idea, exclude_comma):
+        PREDICTION_TIMEOUT = 120
         if just_use_idea:
             print("[LLM Prompt Node] 'Just Use Idea' is enabled. Skipping LLM generation.")
             return (idea, negative, idea)
@@ -178,7 +179,23 @@ class OllamaPromptFromIdea:
                     avoid_clause = ""
                     if avoid_text.strip():
                         avoid_clause = f"\nABSOLUTELY DO NOT use or repeat any of the following phrases or content: {avoid_text}." if avoid_text.strip() else ""
-                    system_message_content = (
+                    if exclude_comma:
+                        system_message_content = (
+                            f"You are a specialized prompt generator for Stable Diffusion XL. "
+                            f"Your task is to convert a raw idea into a single-line, visually dense, and concrete image prompt. "
+                            f"Use only short, descriptive fragments – no emotions, no abstract terms, no opinions. "
+                            f"Focus strictly on visible elements: subject appearance, setting, lighting, objects, materials, and structure. "
+                            f"Use connectors like 'with', 'under', 'surrounded by', but avoid excessive chaining. "
+                            f"Sort ideas by visual importance, from main subject to secondary elements. "
+                            f"The entire prompt must be between {min_tokens} and {max_tokens} tokens. "
+                            f"{avoid_clause}"
+                            f"DO NOT explain your reasoning. DO NOT change or reinterpret the original idea. Preserve it exactly: {sub_idea}"
+                            f"Never use storytelling, feelings, or narrative context."
+                            f"Your output must be suitable for direct input into an AI image generation model."
+                            f"Give a new idea from any previous"
+                        )
+                    else:
+                        system_message_content = (
                         f"You are a specialized prompt generator for Stable Diffusion XL. "
                         f"Your task is to convert a raw idea into a single-line, visually dense, and concrete image prompt. "
                         f"Use only short, descriptive fragments – no full sentences, no emotions, no abstract terms, no opinions. "
@@ -186,7 +203,7 @@ class OllamaPromptFromIdea:
                         f"Use connectors like 'with', 'under', 'surrounded by', but avoid excessive chaining. "
                         f"Sort ideas by visual importance, from main subject to secondary elements. "
                         f"Separate all ideas with commas. In order of importance."
-                        f"The entire prompt must be between {min_tokens} and {max_tokens} SDXL tokens, one single line. "
+                        f"The entire prompt must be between {min_tokens} and {max_tokens} tokens"
                         f"{avoid_clause}"
                         f"DO NOT explain your reasoning. DO NOT change or reinterpret the original idea. Preserve it exactly: {sub_idea}"
                         f"Never use storytelling, feelings, or narrative context."
