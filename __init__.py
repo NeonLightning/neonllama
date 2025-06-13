@@ -100,7 +100,13 @@ def estimate_tokens(text):
 
 class OllamaPromptFromIdea:
     @classmethod
+    def IS_CHANGED(cls, **kwargs):
+        return float("NaN")
+
+    @classmethod
     def INPUT_TYPES(cls):
+        llm_seed = random.randint(0, 1000000000)
+        llm_temp = random.uniform(0.1, 1.0)
         return {
             "required": {
                 "model": (ALL_AVAILABLE_MODELS, {"tooltip": "Select the LLM model (Ollama or LM Studio) to generate prompts with."}),
@@ -112,6 +118,10 @@ class OllamaPromptFromIdea:
                 "regen_on_each_use": ("BOOLEAN", {"default": True, "tooltip": "Force regeneration on each node execution (doesn't matter if just_use_idea is on)."}),
                 "just_use_idea": ("BOOLEAN", {"default": True, "tooltip": "Skip Generating and just use idea as prompt."}),
                 "exclude_comma": ("BOOLEAN", {"default": False, "tooltip": "Disables commas and sentence removal suggesting."}),
+                "randomize_seed": ("BOOLEAN", {"default": True, "tooltip": "Use a random seed on each generation."}),
+                "llm_seed": ("INT", {"default": llm_seed, "min": 0, "max": 999999999, "tooltip": "Fixed seed (only used if randomize_seed is off)."}),
+                "randomize_temp": ("BOOLEAN", {"default": True, "tooltip": "Use a random temperature on each generation."}),
+                "llm_temp": ("FLOAT", {"default": llm_temp, "min": 0.1, "max": 1, "tooltip": "Fixed temperature (only used if randomize_temp is off)."}),
             }
         }
 
@@ -120,11 +130,7 @@ class OllamaPromptFromIdea:
     FUNCTION = "generate_prompt"
     CATEGORY = "LLM Prompts"
 
-    @classmethod
-    def IS_CHANGED(cls, **kwargs):
-        return float("NaN")
-
-    def generate_prompt(self, model, idea, negative, max_tokens, min_tokens, max_attempts, regen_on_each_use, just_use_idea, exclude_comma):
+    def generate_prompt(self, model, idea, negative, max_tokens, min_tokens, max_attempts, regen_on_each_use, just_use_idea, exclude_comma, randomize_seed, llm_seed, randomize_temp, llm_temp):
         PREDICTION_TIMEOUT = 120
         if just_use_idea:
             print("[LLM Prompt Node] 'Just Use Idea' is enabled. Skipping LLM generation.")
@@ -181,7 +187,7 @@ class OllamaPromptFromIdea:
                         avoid_clause = f"\nABSOLUTELY DO NOT use or repeat any of the following phrases or content: {avoid_text}." if avoid_text.strip() else ""
                     if exclude_comma:
                         system_message_content = (
-                            f"You are a specialized prompt generator for Stable Diffusion XL. "
+                            f"You are a specialized prompt generator for Stable Diffusion. "
                             f"Your task is to convert a raw idea into a single-line, visually dense, and concrete image prompt. "
                             f"Use only short, descriptive fragments – no emotions, no abstract terms, no opinions. "
                             f"Focus strictly on visible elements: subject appearance, setting, lighting, objects, materials, and structure. "
@@ -189,14 +195,14 @@ class OllamaPromptFromIdea:
                             f"Sort ideas by visual importance, from main subject to secondary elements. "
                             f"The entire prompt must be between {min_tokens} and {max_tokens} tokens. "
                             f"{avoid_clause}"
-                            f"DO NOT explain your reasoning. DO NOT change or reinterpret the original idea. Preserve it exactly: {sub_idea}"
+                            f"DO NOT explain your reasoning or describe what you are doing. DO NOT change or reinterpret the original idea. Preserve it exactly: {sub_idea}"
                             f"Never use storytelling, feelings, or narrative context."
                             f"Your output must be suitable for direct input into an AI image generation model."
                             f"Give a new idea from any previous"
                         )
                     else:
                         system_message_content = (
-                        f"You are a specialized prompt generator for Stable Diffusion XL. "
+                        f"You are a specialized prompt generator for Stable Diffusion. "
                         f"Your task is to convert a raw idea into a single-line, visually dense, and concrete image prompt. "
                         f"Use only short, descriptive fragments – no full sentences, no emotions, no abstract terms, no opinions. "
                         f"Focus strictly on visible elements: subject appearance, setting, lighting, objects, materials, and structure. "
@@ -205,7 +211,7 @@ class OllamaPromptFromIdea:
                         f"Separate all ideas with commas. In order of importance."
                         f"The entire prompt must be between {min_tokens} and {max_tokens} tokens"
                         f"{avoid_clause}"
-                        f"DO NOT explain your reasoning. DO NOT change or reinterpret the original idea. Preserve it exactly: {sub_idea}"
+                        f"DO NOT explain your reasoning or describe what you are doing. DO NOT change or reinterpret the original idea. Preserve it exactly: {sub_idea}"
                         f"Never use storytelling, feelings, or narrative context."
                         f"Your output must be suitable for direct input into an AI image generation model."
                         f"Give a new idea from any previous"
@@ -215,17 +221,18 @@ class OllamaPromptFromIdea:
                         token_count_last_output = estimate_tokens(last_output)
                         if token_count_last_output > max_tokens:
                             user_message_content = (
-                                f"\nOriginal prompt: {sub_idea}\n"
+                                f"DO NOT explain your reasoning or describe what you are doing."
                                 f"The following prompt is too long it needs to be slightly shorter."
                                 f"Shorten it without removing detail. Compress phrases, remove redundancy. "
                                 f"{avoid_clause}"
                                 f"Never use storytelling, feelings, or narrative context."
                                 f"Your output must be suitable for direct input into an AI image generation model."
                                 f"Give a new idea from the previous"
+                                f"{user_message_content}"
                             )
                         elif token_count_last_output < min_tokens:
                             user_message_content = (
-                                f"\nOriginal prompt: {sub_idea}\n"
+                                f"DO NOT explain your reasoning or describe what you are doing."
                                 f"The following prompt is too short it needs to be slightly longer.. "
                                 f"Expand it with vivid, concrete visual details. Add setting, lighting, textures, or objects. "
                                 f"Do NOT repeat. "
@@ -233,30 +240,34 @@ class OllamaPromptFromIdea:
                                 f"Never use storytelling, feelings, or narrative context."
                                 f"Your output must be suitable for direct input into an AI image generation model."
                                 f"Give a new idea from the previous"
+                                f"{user_message_content}"
                             )
                         else:
                             user_message_content = (
-                                f"\nOriginal prompt: {sub_idea}\n"
+                                f"DO NOT explain your reasoning or describe what you are doing."
                                 f"Improve the following prompt for visual clarity and composition. "
                                 f"Structure for better flow, but stay under {max_tokens} tokens. "
                                 f"{avoid_clause}"
                                 f"Never use storytelling, feelings, or narrative context."
                                 f"Your output must be suitable for direct input into an AI image generation model."
                                 f"Give a new idea from the previous"
+                                f"{user_message_content}"
                             )
                         system_message_content += avoid_clause
-                    adaptive_temperature = 0.1 + (random.random() * (0.9 - 0.1))
+                    if randomize_temp:
+                        llm_temp = random.uniform(0.1, 1.0)
                     raw_result = ""
                     if is_ollama_model:
                         api_url = "http://localhost:11434/api/generate"
-                        random_seed = random.randint(0, 1000000000)
+                        if randomize_seed:
+                            llm_seed = random.randint(0, 1000000000)
                         payload = {
                             "model": actual_model_name,
                             "prompt": system_message_content + "\n" + user_message_content,
                             "stream": False,
                             "options": {
-                                "temperature": adaptive_temperature,
-                                "seed": random_seed,
+                                "temperature": llm_temp,
+                                "seed": llm_seed,
                             }
                         }
                         response = requests.post(
@@ -269,9 +280,9 @@ class OllamaPromptFromIdea:
                     elif is_lmstudio_model:
                         if lm_studio_llm_instance is None:
                             raise ConnectionError("LM Studio LLM instance not initialized for API call.")
-                        chat = lms.Chat(system_message_content)
-                        chat.add_user_message(user_message_content)
-                        stream = lm_studio_llm_instance.respond_stream(chat, config={"repeatPenalty":1.3, "temperature":adaptive_temperature,}, on_message=chat.append)
+                        chat = lms.Chat()
+                        chat.add_user_message(system_message_content + "\n" + user_message_content)
+                        stream = lm_studio_llm_instance.respond_stream(chat, config={"repeatPenalty":1.1, "temperature":llm_temp, "seed": llm_seed,}, on_message=chat.append)
                         cancelled = False
                         def timeout_handler():
                             nonlocal cancelled
