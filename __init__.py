@@ -122,6 +122,7 @@ class OllamaPromptFromIdea:
                 "llm_seed": ("INT", {"default": llm_seed, "min": 0, "max": 999999999, "tooltip": "Fixed seed (only used if randomize_seed is off)."}),
                 "randomize_temp": ("BOOLEAN", {"default": True, "tooltip": "Use a random temperature on each generation."}),
                 "llm_temp": ("FLOAT", {"default": llm_temp, "min": 0.1, "max": 1, "tooltip": "Fixed temperature (only used if randomize_temp is off)."}),
+                "keepllm": ("BOOLEAN", {"default": False, "tooltip": "Keep LLM model in memory."}),
             }
         }
 
@@ -130,7 +131,7 @@ class OllamaPromptFromIdea:
     FUNCTION = "generate_prompt"
     CATEGORY = "LLM Prompts"
 
-    def generate_prompt(self, model, idea, negative, max_tokens, min_tokens, max_attempts, regen_on_each_use, just_use_idea, exclude_comma, randomize_seed, llm_seed, randomize_temp, llm_temp):
+    def generate_prompt(self, model, idea, negative, max_tokens, min_tokens, max_attempts, regen_on_each_use, just_use_idea, exclude_comma, randomize_seed, llm_seed, randomize_temp, llm_temp, keepllm):
         PREDICTION_TIMEOUT = 120
         if just_use_idea:
             print("[LLM Prompt Node] 'Just Use Idea' is enabled. Skipping LLM generation.")
@@ -195,7 +196,7 @@ class OllamaPromptFromIdea:
                             f"Sort ideas by visual importance, from main subject to secondary elements. "
                             f"The entire prompt must be between {min_tokens} and {max_tokens} tokens. "
                             f"{avoid_clause}"
-                            f"DO NOT explain your reasoning or describe what you are doing. DO NOT change or reinterpret the original idea. Preserve it exactly: {sub_idea}"
+                            f"DO NOT explain your reasoning or describe what you are doing. DO NOT reinterpret the original idea. Preserve it: {sub_idea}"
                             f"Never use storytelling, feelings, or narrative context."
                             f"Your output must be suitable for direct input into an AI image generation model."
                             f"Give a new idea from any previous"
@@ -211,7 +212,7 @@ class OllamaPromptFromIdea:
                         f"Separate all ideas with commas. In order of importance."
                         f"The entire prompt must be between {min_tokens} and {max_tokens} tokens"
                         f"{avoid_clause}"
-                        f"DO NOT explain your reasoning or describe what you are doing. DO NOT change or reinterpret the original idea. Preserve it exactly: {sub_idea}"
+                        f"DO NOT explain your reasoning or describe what you are doing. DO NOT reinterpret the original idea. Preserve it: {sub_idea}"
                         f"Never use storytelling, feelings, or narrative context."
                         f"Your output must be suitable for direct input into an AI image generation model."
                         f"Give a new idea from any previous"
@@ -228,7 +229,7 @@ class OllamaPromptFromIdea:
                                 f"Never use storytelling, feelings, or narrative context."
                                 f"Your output must be suitable for direct input into an AI image generation model."
                                 f"Give a new idea from the previous"
-                                f"{user_message_content}"
+                                f"{last_output}"
                             )
                         elif token_count_last_output < min_tokens:
                             user_message_content = (
@@ -240,7 +241,7 @@ class OllamaPromptFromIdea:
                                 f"Never use storytelling, feelings, or narrative context."
                                 f"Your output must be suitable for direct input into an AI image generation model."
                                 f"Give a new idea from the previous"
-                                f"{user_message_content}"
+                                f"{last_output}"
                             )
                         else:
                             user_message_content = (
@@ -251,7 +252,7 @@ class OllamaPromptFromIdea:
                                 f"Never use storytelling, feelings, or narrative context."
                                 f"Your output must be suitable for direct input into an AI image generation model."
                                 f"Give a new idea from the previous"
-                                f"{user_message_content}"
+                                f"{last_output}"
                             )
                         system_message_content += avoid_clause
                     if randomize_temp:
@@ -317,11 +318,12 @@ class OllamaPromptFromIdea:
                         used_phrases.append(raw_result)
                         print("✔️ Prompt accepted.")
                         timeout_number = 0
-                        if is_ollama_model:
-                            clear_ollama_model()
-                        elif is_lmstudio_model and lm_studio_llm_instance:
-                            model = lms.llm()
-                            model.unload()
+                        if keepllm == False:
+                            if is_ollama_model:
+                                clear_ollama_model()
+                            elif is_lmstudio_model and lm_studio_llm_instance:
+                                model = lms.llm()
+                                model.unload()
                         generated_prompts.append(raw_result)
                         break
                     last_output = raw_result
@@ -331,8 +333,9 @@ class OllamaPromptFromIdea:
                 except requests.exceptions.HTTPError as e:
                     if e.response.status_code == 500:
                         print(f"⚠️ Attempt {attempt}/{max_attempts} HTTP 500 error. Retrying...\n")
-                        if is_ollama_model:
-                            clear_ollama_model()
+                        if keepllm == False:
+                            if is_ollama_model:
+                                clear_ollama_model()
                         time.sleep(1)
                         continue
                     else:
@@ -350,11 +353,12 @@ class OllamaPromptFromIdea:
                         print(f"❌ {error_msg}")
                         generated_prompts.append(sub_idea)
                         timeout_number = 0
-                        if is_ollama_model:
-                            clear_ollama_model()
-                        elif is_lmstudio_model and lm_studio_llm_instance:
-                            model = lms.llm()
-                            model.unload()
+                        if keepllm == False:
+                            if is_ollama_model:
+                                clear_ollama_model()
+                            elif is_lmstudio_model and lm_studio_llm_instance:
+                                model = lms.llm()
+                                model.unload()
                         break
                 except TimeoutError as e:
                     if timeout_number < 5:
@@ -367,27 +371,30 @@ class OllamaPromptFromIdea:
                         print(f"❌ {error_msg}")
                         generated_prompts.append(sub_idea)
                         timeout_number = 0
-                        if is_lmstudio_model and lm_studio_llm_instance:
-                            model = lms.llm()
-                            model.unload()
+                        if keepllm == False:
+                            if is_lmstudio_model and lm_studio_llm_instance:
+                                model = lms.llm()
+                                model.unload()
                         break
                 except Exception as e:
                     error_msg = f"[LLM Error] {str(e)}"
                     print(error_msg)
+                    if keepllm == False:
+                        if is_ollama_model:
+                            clear_ollama_model()
+                        elif is_lmstudio_model and lm_studio_llm_instance:
+                            model = lms.llm()
+                            model.unload()
+                    return (error_msg, negative, idea)
+            else:
+                print(f"❌ Max attempts for idea '{sub_idea}' reached. Using original as fallback.")
+                timeout_number = 0
+                if keepllm == False:
                     if is_ollama_model:
                         clear_ollama_model()
                     elif is_lmstudio_model and lm_studio_llm_instance:
                         model = lms.llm()
                         model.unload()
-                    return (error_msg, negative, idea)
-            else:
-                print(f"❌ Max attempts for idea '{sub_idea}' reached. Using original as fallback.")
-                timeout_number = 0
-                if is_ollama_model:
-                    clear_ollama_model()
-                elif is_lmstudio_model and lm_studio_llm_instance:
-                    model = lms.llm()
-                    model.unload()
                 generated_prompts.append(sub_idea)
         final_prompt = " BREAK ".join(generated_prompts)
         print(f"\nFinal Generated Prompt: {final_prompt}")
