@@ -1,0 +1,7 @@
+{
+    "name": "NeonLlama",
+    "author": "NeonLightning",
+    "version": "0.5.1",
+    "project": "https://github.com/neonlightning/neonllama",
+    "description": "Simple LM Studio and Ollama node"
+}

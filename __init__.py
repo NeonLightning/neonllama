@@ -116,7 +116,7 @@ class OllamaPromptFromIdea:
                 "min_tokens": ("INT", {"default": 50, "min": 10, "max": 1024, "tooltip": "Minimum token length for the generated prompt."}),
                 "max_attempts": ("INT", {"default": 30, "min": 1, "max": 200, "tooltip": "Number of attempts to generate a prompt fitting token limits."}),
                 "regen_on_each_use": ("BOOLEAN", {"default": True, "tooltip": "Force regeneration on each node execution (doesn't matter if just_use_idea is on)."}),
-                "just_use_idea": ("BOOLEAN", {"default": True, "tooltip": "Skip Generating and just use idea as prompt."}),
+                "just_use_idea": ("BOOLEAN", {"default": False, "tooltip": "Skip Generating and just use idea as prompt."}),
                 "exclude_comma": ("BOOLEAN", {"default": False, "tooltip": "Disables commas and sentence removal suggesting."}),
                 "randomize_seed": ("BOOLEAN", {"default": True, "tooltip": "Use a random seed on each generation."}),
                 "llm_seed": ("INT", {"default": llm_seed, "min": 0, "max": 999999999, "tooltip": "Fixed seed (only used if randomize_seed is off)."}),
