@@ -5,98 +5,73 @@ import time
 import requests.exceptions
 from pathlib import Path
 from comfy.utils import ProgressBar
-from tokenizers import Tokenizer
-import lmstudio
-import lmstudio as lms
 import threading
-import time
+import traceback
 
-def fetch_all_llm_models():
-    all_models = []
-    ollama_url = "http://localhost:11434/api/tags"
-    try:
-        res = requests.get(ollama_url, timeout=5)
-        res.raise_for_status()
-        data = res.json()
-        ollama_models = [m["model"] for m in data.get("models", [])]
-        print(f"[Ollama] Fetched models: {ollama_models}")
-        all_models.extend([f"ollama:{model}" for model in ollama_models])
-    except requests.exceptions.ConnectionError:
-        print("[Ollama] Failed to connect to Ollama. Is the server running on localhost:11434?")
-    except Exception as e:
-        print(f"[Ollama] Failed to fetch models: {e}")
-    try:
-        client = lms.Client()
-        downloaded_lmstudio_models = client.list_downloaded_models()
-        lmstudio_llm_model_keys = []
-        if not downloaded_lmstudio_models:
-            print("No downloaded models found in your LM Studio installation.")
-        else:
-            for model_obj in downloaded_lmstudio_models:
-                if isinstance(model_obj, lms.DownloadedLlm):
-                    lmstudio_llm_model_keys.append(model_obj.model_key)
-        print(f"[LM Studio] Fetched LLM model keys: {lmstudio_llm_model_keys}")
-        all_models.extend([f"lmstudio:{key}" for key in lmstudio_llm_model_keys])
-    except requests.exceptions.ConnectionError:
-        print("[LM Studio] Failed to connect to LM Studio. Is the server running on localhost:1234?")
-    except Exception as e:
-        print(f"[LM Studio] Failed to fetch LM Studio models: {e}")
-    if not all_models:
-        print("[Global Model Fetch] No models found from Ollama or LM Studio. Please check servers.")
-        return ["No models found - ensure Ollama or LM Studio is running."]
-    else:
-        print(f"[Global Model Fetch] Combined available models: {all_models}")
-        return all_models
-
-def clear_ollama_model():
-    try:
-        result = subprocess.run(["ollama", "ps"], capture_output=True, text=True, check=False, timeout=5)
-        if result.returncode != 0:
-            print(f"[Ollama] 'ollama ps' command failed: {result.stderr.strip()}")
-            return False
-        lines = result.stdout.strip().splitlines()
-        if len(lines) < 2 or "MODEL" not in lines[0]:
-            print("[Ollama] No Ollama model is currently loaded or 'ollama ps' output is unexpected.")
-            return False
-        model_name = lines[1].split()[0]
-        if not model_name:
-            print("[Ollama] Could not determine Ollama model name from 'ollama ps' output.")
-            return False
-        res = requests.post(
-            "http://localhost:11434/api/generate",
-            json={"model": model_name, "keep_alive": "0m"},
-            timeout=10
-        )
-        res.raise_for_status()
-        print(f"[Ollama] Unloaded model: {model_name}")
-        return True
-    except subprocess.CalledProcessError as e:
-        print(f"[Ollama] Error running 'ollama ps': {e}")
-    except requests.exceptions.RequestException as e:
-        print(f"[Ollama] Error sending unload request: {e}")
-    except Exception as e:
-        print(f"[Ollama] An unexpected error occurred during Ollama model clearing: {e}")
-    return False
-
-ALL_AVAILABLE_MODELS = fetch_all_llm_models()
+LMSTUDIO_AVAILABLE = False
+lms = None
 try:
-    lmstudio_model = lms.llm()
-    lmstudio_model.unload()
-    print("[LM Studio] Unloaded any previously running model at startup.")
-except Exception as e:
-    print(f"[LM Studio] No model to unload or error unloading at startup: {e}")
-clear_ollama_model()
-try:
-    tokenizer = Tokenizer.from_pretrained("laion/CLIP-ViT-bigG-14-laion2B-39B-b160k")
-except Exception as e:
-    print(f"Warning: Could not load tokenizer. Prompt token estimation will not work: {e}")
-    tokenizer = None
+    import lmstudio as lms
+    from lmstudio.sync_api import Client
+    LMSTUDIO_AVAILABLE = True
+except ImportError:
+    print("⚠️ LM Studio SDK not installed. LM Studio functionality disabled.")
+ALL_AVAILABLE_MODELS = ["Loading models..."]
+tokenizer = None
+MODELS_LOADED = False
 
-def estimate_tokens(text):
-    if tokenizer:
-        return len(tokenizer.encode(text).ids)
+def initialize_in_background():
+    global ALL_AVAILABLE_MODELS, tokenizer, MODELS_LOADED
+    models = []
+    try:
+        res = requests.get("http://localhost:11434/api/tags", timeout=1.5)
+        if res.status_code == 200:
+            ollama_models = [m["model"] for m in res.json().get("models", [])]
+            models.extend([f"ollama:{m}" for m in ollama_models])
+            print(f"✅ Found {len(ollama_models)} Ollama models")
+    except Exception as e:
+        print(f"⚠️ Ollama model fetch skipped: {str(e)}")
+    if LMSTUDIO_AVAILABLE and lms is not None:
+        try:
+            client = Client()
+            result = []
+            def fetch_models():
+                try:
+                    nonlocal result
+                    downloaded_models = client.list_downloaded_models() or []
+                    result = [
+                        m.model_key for m in downloaded_models 
+                        if isinstance(m, lms.DownloadedLlm)
+                    ]
+                except Exception as e:
+                    print(f"LM Studio fetch error: {str(e)}")
+                    result = []
+            t = threading.Thread(target=fetch_models)
+            t.daemon = True
+            t.start()
+            t.join(timeout=2.0)            
+            if t.is_alive():
+                print("⚠️ LM Studio model fetch timed out after 2 seconds")
+            else:
+                models.extend([f"lmstudio:{key}" for key in result])
+                print(f"✅ Found {len(result)} LM Studio models")
+        except Exception as e:
+            print(f"⚠️ LM Studio model fetch failed: {str(e)}")
+            traceback.print_exc()
+    if models:
+        ALL_AVAILABLE_MODELS = models
     else:
-        return len(text.split())
+        ALL_AVAILABLE_MODELS = ["No models available - check Ollama/LM Studio"]
+    try:
+        from tokenizers import Tokenizer
+        tokenizer = Tokenizer.from_pretrained("laion/CLIP-ViT-bigG-14-laion2B-39B-b160k")
+        print("✅ Tokenizer loaded successfully")
+    except Exception as e:
+        print(f"⚠️ Tokenizer load failed: {str(e)}")
+        tokenizer = None
+    MODELS_LOADED = True
+
+threading.Thread(target=initialize_in_background, daemon=True).start()
 
 class OllamaPromptFromIdea:
     @classmethod
